@@ -330,60 +330,89 @@ private:
 
     void parseStmt() {
         if (match(TOK_INT)) {
-            // Variable declaration
+            // 变量声明
             advance();
-            consume(TOK_ID, "Expected variable name");
+            if (!consume(TOK_ID, "Expected variable name")) {
+                while (!match(TOK_SEMICOLON) && !match(TOK_EOF) && !match(TOK_RBRACE)) advance();
+                if (match(TOK_SEMICOLON)) advance();
+                return;
+            }
             if (match(TOK_ASSIGN)) {
                 advance();
                 parseExpr();
             }
-            consume(TOK_SEMICOLON, "Lack of ';'");
+            if (!consume(TOK_SEMICOLON, "Lack of ';'")) {
+                while (!match(TOK_SEMICOLON) && !match(TOK_EOF) && !match(TOK_RBRACE)) advance();
+                if (match(TOK_SEMICOLON)) advance();
+            }
+            return;
         } else if (match(TOK_IF)) {
             advance();
-            consume(TOK_LPAREN, "Lack of '('");
-            parseExpr();
-            consume(TOK_RPAREN, "Lack of ')'");
+            if (!consume(TOK_LPAREN, "Lack of '('")) {
+                while (!match(TOK_RPAREN) && !match(TOK_EOF) && !match(TOK_LBRACE) && !match(TOK_SEMICOLON)) advance();
+            } else {
+                parseExpr();
+                consume(TOK_RPAREN, "Lack of ')'");
+            }
             parseStmt();
             if (match(TOK_ELSE)) {
                 advance();
                 parseStmt();
             }
+            return;
         } else if (match(TOK_WHILE)) {
             advance();
-            consume(TOK_LPAREN, "Lack of '('");
-            parseExpr();
-            consume(TOK_RPAREN, "Lack of ')'");
+            if (!consume(TOK_LPAREN, "Lack of '('")) {
+                while (!match(TOK_RPAREN) && !match(TOK_EOF) && !match(TOK_LBRACE) && !match(TOK_SEMICOLON)) advance();
+            } else {
+                parseExpr();
+                consume(TOK_RPAREN, "Lack of ')'");
+            }
             loopDepth++;
             parseStmt();
             loopDepth--;
+            return;
         } else if (match(TOK_BREAK)) {
             advance();
-            if (loopDepth == 0) {
-                addError("break statement not in loop");
+            if (loopDepth == 0) addError("break not in loop");
+            if (!consume(TOK_SEMICOLON, "Lack of ';'")) {
+                while (!match(TOK_SEMICOLON) && !match(TOK_EOF) && !match(TOK_RBRACE)) advance();
+                if (match(TOK_SEMICOLON)) advance();
             }
-            consume(TOK_SEMICOLON, "Lack of ';'");
+            return;
         } else if (match(TOK_CONTINUE)) {
             advance();
-            if (loopDepth == 0) {
-                addError("continue statement not in loop");
+            if (loopDepth == 0) addError("continue not in loop");
+            if (!consume(TOK_SEMICOLON, "Lack of ';'")) {
+                while (!match(TOK_SEMICOLON) && !match(TOK_EOF) && !match(TOK_RBRACE)) advance();
+                if (match(TOK_SEMICOLON)) advance();
             }
-            consume(TOK_SEMICOLON, "Lack of ';'");
+            return;
         } else if (match(TOK_RETURN)) {
             advance();
             if (!match(TOK_SEMICOLON)) {
                 parseExpr();
             }
-            consume(TOK_SEMICOLON, "Lack of ';'");
+            if (!consume(TOK_SEMICOLON, "Lack of ';'")) {
+                while (!match(TOK_SEMICOLON) && !match(TOK_EOF) && !match(TOK_RBRACE)) advance();
+                if (match(TOK_SEMICOLON)) advance();
+            }
+            return;
         } else if (match(TOK_LBRACE)) {
             parseBlock();
+            return;
         } else if (match(TOK_ID)) {
-            Token id = advance();
+            // 赋值或函数调用或表达式语句
+            advance();
             if (match(TOK_ASSIGN)) {
                 advance();
                 parseExpr();
-                consume(TOK_SEMICOLON, "Lack of ';'");
+                if (!consume(TOK_SEMICOLON, "Lack of ';'")) {
+                    while (!match(TOK_SEMICOLON) && !match(TOK_EOF) && !match(TOK_RBRACE)) advance();
+                    if (match(TOK_SEMICOLON)) advance();
+                }
+                return;
             } else if (match(TOK_LPAREN)) {
-                // Function call
                 advance();
                 if (!match(TOK_RPAREN)) {
                     parseExpr();
@@ -393,15 +422,29 @@ private:
                     }
                 }
                 consume(TOK_RPAREN, "Lack of ')'");
-                consume(TOK_SEMICOLON, "Lack of ';'");
+                if (!consume(TOK_SEMICOLON, "Lack of ';'")) {
+                    while (!match(TOK_SEMICOLON) && !match(TOK_EOF) && !match(TOK_RBRACE)) advance();
+                    if (match(TOK_SEMICOLON)) advance();
+                }
+                return;
             } else {
-                addError("Lack of ';'");
+                addError("Invalid statement");
+                while (!match(TOK_SEMICOLON) && !match(TOK_EOF) && !match(TOK_RBRACE)) advance();
+                if (match(TOK_SEMICOLON)) advance();
+                return;
             }
-        } else if (match(TOK_SEMICOLON)) {
-            advance();
         } else {
-            addError("Invalid statement");
-            advance();
+            // 空语句或表达式语句
+            if (match(TOK_SEMICOLON)) {
+                advance();
+                return;
+            }
+            parseExpr();
+            if (!consume(TOK_SEMICOLON, "Lack of ';'")) {
+                while (!match(TOK_SEMICOLON) && !match(TOK_EOF) && !match(TOK_RBRACE)) advance();
+                if (match(TOK_SEMICOLON)) advance();
+            }
+            return;
         }
     }
 
