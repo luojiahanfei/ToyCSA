@@ -248,8 +248,23 @@ private:
         if (match(TOK_SEMICOLON)) advance();
     }
 
+    void syncToFuncDef() {
+        while (!match(TOK_EOF)) {
+            if (match(TOK_INT) || match(TOK_VOID)) {
+                if (pos + 1 < tokens.size() && tokens[pos + 1].type == TOK_ID) {
+                    return;
+                }
+            }
+            advance();
+        }
+    }
+
     void parseCompUnit() {
         while (!match(TOK_EOF)) {
+            if (!match(TOK_INT) && !match(TOK_VOID)) {
+                syncToFuncDef();
+                if (match(TOK_EOF)) break;
+            }
             parseFuncDef();
         }
     }
@@ -257,17 +272,20 @@ private:
     void parseFuncDef() {
         if (!match(TOK_INT) && !match(TOK_VOID)) {
             error("Expected function return type");
-            sync();
+            syncToFuncDef();
             return;
         }
         advance();
 
         if (!consume(TOK_ID, "Expected function name")) {
-            sync();
+            syncToFuncDef();
             return;
         }
 
-        consume(TOK_LPAREN, "Lack of '('");
+        if (!consume(TOK_LPAREN, "Lack of '('")) {
+            syncToFuncDef();
+            return;
+        }
 
         if (match(TOK_INT)) {
             parseParam();
@@ -277,7 +295,10 @@ private:
             }
         }
 
-        consume(TOK_RPAREN, "Lack of ')'");
+        if (!consume(TOK_RPAREN, "Lack of ')'")) {
+            syncToFuncDef();
+            return;
+        }
         parseBlock();
     }
 
@@ -292,7 +313,14 @@ private:
         }
 
         while (!match(TOK_RBRACE) && !match(TOK_EOF)) {
-            parseStmt();
+            if (match(TOK_INT) || match(TOK_IF) || match(TOK_WHILE) || 
+                match(TOK_BREAK) || match(TOK_CONTINUE) || match(TOK_RETURN) ||
+                match(TOK_LBRACE) || match(TOK_ID) || match(TOK_SEMICOLON)) {
+                parseStmt();
+            } else {
+                error("Unexpected token in block");
+                advance();
+            }
         }
 
         consume(TOK_RBRACE, "Lack of '}'");
@@ -301,7 +329,10 @@ private:
     void parseStmt() {
         if (match(TOK_INT)) {
             advance();
-            consume(TOK_ID, "Expected identifier");
+            if (!consume(TOK_ID, "Expected identifier")) {
+                sync();
+                return;
+            }
             if (match(TOK_ASSIGN)) {
                 advance();
                 parseExpr();
@@ -354,10 +385,14 @@ private:
                         parseExpr();
                     }
                 }
-                consume(TOK_RPAREN, "Lack of ')'");
+                if (!consume(TOK_RPAREN, "Lack of ')'")) {
+                    sync();
+                    return;
+                }
                 consume(TOK_SEMICOLON, "Lack of ';'");
             } else {
-                consume(TOK_SEMICOLON, "Lack of ';'");
+                error("Unexpected identifier");
+                sync();
             }
         } else if (match(TOK_SEMICOLON)) {
             advance();
@@ -448,7 +483,8 @@ private:
             consume(TOK_RPAREN, "Lack of ')'");
         } else {
             error("Expected expression");
-            if (!match(TOK_EOF) && !match(TOK_SEMICOLON)) {
+            if (!match(TOK_EOF) && !match(TOK_SEMICOLON) && !match(TOK_RPAREN) && 
+                !match(TOK_COMMA) && !match(TOK_RBRACE)) {
                 advance();
             }
         }
@@ -483,7 +519,7 @@ int main() {
     auto lexErrors = lexer.getErrors();
 
     Parser parser(tokens);
-    bool success = parser.parse();
+    parser.parse();
     auto parseErrors = parser.getErrors();
 
     map<int, string> allErrors = lexErrors;
