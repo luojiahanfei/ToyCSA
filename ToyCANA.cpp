@@ -493,7 +493,6 @@ private:
             advance();
         } else if (match(TOK_LPAREN)) {
             advance();
-transcribe(input)
             parseExpr();
             consume(TOK_RPAREN, "Lack of ')'");
         } else {
