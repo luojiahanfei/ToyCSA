@@ -286,14 +286,10 @@ private:
         }
 
         if (!consume(TOK_LPAREN, "Lack of '('")) {
-            // 如果连 '(' 都没有，很可能后面全错了，
-            // 跳到 '{' 或下一个函数定义
             while (!match(TOK_EOF) && !match(TOK_LBRACE)) {
                 if (match(TOK_INT) || match(TOK_VOID)) break;
                 advance();
             }
-            // 如果没找到 '{'，就直接返回，让上层处理
-            if (!match(TOK_LBRACE)) return; 
         }
 
         // Parameters
@@ -306,9 +302,10 @@ private:
         }
 
         if (!consume(TOK_RPAREN, "Lack of ')'")) {
-            // *** 漏洞二修复 ***
-            // 删掉了这里的 while 循环
-            // 即使 ')' 错了，也继续尝试解析 '{'
+            while (!match(TOK_EOF) && !match(TOK_LBRACE)) {
+                if (match(TOK_INT) || match(TOK_VOID)) break;
+                advance();
+            }
         }
 
         parseBlock();
@@ -321,9 +318,7 @@ private:
 
     void parseBlock() {
         if (!consume(TOK_LBRACE, "Lack of '{'")) {
-            // *** 漏洞三修复 ***
-            // 删掉了这里的 return;
-            // 就算没有 '{'，也假装有，继续解析内部语句
+            return;
         }
 
         while (!match(TOK_RBRACE) && !match(TOK_EOF)) {
@@ -333,9 +328,7 @@ private:
         consume(TOK_RBRACE, "Lack of '}'");
     }
 
-    void parseStmt() {
-        // *** 漏洞一修复 ***
-        // (整个函数被替换)
+   void parseStmt() {
         if (match(TOK_INT)) {
             // 变量声明: "int" ID ("=" Expr)? ";"
             advance();
@@ -402,14 +395,6 @@ private:
         } else if (match(TOK_EOF) || match(TOK_RBRACE)) {
             // 意外的文件结尾或块结尾，不消耗 token，
             // 让 parseBlock 或 parseCompUnit 来处理
-            
-            // 如果是EOF，上层循环会终止
-            // 如果是RBRACE，parseBlock的循环会终止
-            // 但如果在这里，说明它不该出现，加个错误
-            if (!match(TOK_EOF)) { // 别在文件末尾报错
-                 addError("Invalid statement or missing ';'");
-            }
-            // 但我们不能消耗它，所以直接返回
             return;
         }
         else {
@@ -419,7 +404,7 @@ private:
             consume(TOK_SEMICOLON, "Lack of ';'");
         }
     }
-
+    
     void parseExpr() {
         parseLOrExpr();
     }
@@ -540,7 +525,7 @@ int main() {
     vector<pair<int, string>> allErrors = lexErrors;
     allErrors.insert(allErrors.end(), parseErrors.begin(), parseErrors.end());
 
-    if (allErrors.empty() && success) {
+    if (allErrors.empty() && success) {  // 修改这行，加入 success 检查
         cout << "accept" << endl;
     } else {
         cout << "reject" << endl;
