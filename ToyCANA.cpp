@@ -5,6 +5,7 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <algorithm>  // 添加这行以使用 sort()
 
 using namespace std;
 
@@ -524,12 +525,11 @@ int main() {
     vector<pair<int, string>> allErrors = lexErrors;
     allErrors.insert(allErrors.end(), parseErrors.begin(), parseErrors.end());
 
-    if (allErrors.empty()) {
+    if (allErrors.empty() && success) {  // 修改这行，加入 success 检查
         cout << "accept" << endl;
     } else {
         cout << "reject" << endl;
         
-        // Sort by line number
         sort(allErrors.begin(), allErrors.end());
         
         for (const auto& err : allErrors) {
