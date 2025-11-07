@@ -286,10 +286,14 @@ private:
         }
 
         if (!consume(TOK_LPAREN, "Lack of '('")) {
+            // 如果连 '(' 都没有，很可能后面全错了，
+            // 跳到 '{' 或下一个函数定义
             while (!match(TOK_EOF) && !match(TOK_LBRACE)) {
                 if (match(TOK_INT) || match(TOK_VOID)) break;
                 advance();
             }
+            // 如果没找到 '{'，就直接返回，让上层处理
+            if (!match(TOK_LBRACE)) return; 
         }
 
         // Parameters
@@ -302,10 +306,9 @@ private:
         }
 
         if (!consume(TOK_RPAREN, "Lack of ')'")) {
-            while (!match(TOK_EOF) && !match(TOK_LBRACE)) {
-                if (match(TOK_INT) || match(TOK_VOID)) break;
-                advance();
-            }
+            // *** 漏洞二修复 ***
+            // 删掉了这里的 while 循环
+            // 即使 ')' 错了，也继续尝试解析 '{'
         }
 
         parseBlock();
@@ -318,7 +321,9 @@ private:
 
     void parseBlock() {
         if (!consume(TOK_LBRACE, "Lack of '{'")) {
-            return;
+            // *** 漏洞三修复 ***
+            // 删掉了这里的 return;
+            // 就算没有 '{'，也假装有，继续解析内部语句
         }
 
         while (!match(TOK_RBRACE) && !match(TOK_EOF)) {
@@ -329,8 +334,10 @@ private:
     }
 
     void parseStmt() {
+        // *** 漏洞一修复 ***
+        // (整个函数被替换)
         if (match(TOK_INT)) {
-            // Variable declaration
+            // 变量声明: "int" ID ("=" Expr)? ";"
             advance();
             consume(TOK_ID, "Expected variable name");
             if (match(TOK_ASSIGN)) {
@@ -339,6 +346,7 @@ private:
             }
             consume(TOK_SEMICOLON, "Lack of ';'");
         } else if (match(TOK_IF)) {
+            // If 语句
             advance();
             consume(TOK_LPAREN, "Lack of '('");
             parseExpr();
@@ -349,6 +357,7 @@ private:
                 parseStmt();
             }
         } else if (match(TOK_WHILE)) {
+            // While 语句
             advance();
             consume(TOK_LPAREN, "Lack of '('");
             parseExpr();
@@ -357,51 +366,57 @@ private:
             parseStmt();
             loopDepth--;
         } else if (match(TOK_BREAK)) {
+            // Break 语句
             advance();
             if (loopDepth == 0) {
                 addError("break statement not in loop");
             }
             consume(TOK_SEMICOLON, "Lack of ';'");
         } else if (match(TOK_CONTINUE)) {
+            // Continue 语句
             advance();
             if (loopDepth == 0) {
                 addError("continue statement not in loop");
             }
             consume(TOK_SEMICOLON, "Lack of ';'");
         } else if (match(TOK_RETURN)) {
+            // Return 语句
             advance();
             if (!match(TOK_SEMICOLON)) {
                 parseExpr();
             }
             consume(TOK_SEMICOLON, "Lack of ';'");
         } else if (match(TOK_LBRACE)) {
+            // 语句块
             parseBlock();
-        } else if (match(TOK_ID)) {
-            Token id = advance();
-            if (match(TOK_ASSIGN)) {
-                advance();
-                parseExpr();
-                consume(TOK_SEMICOLON, "Lack of ';'");
-            } else if (match(TOK_LPAREN)) {
-                // Function call
-                advance();
-                if (!match(TOK_RPAREN)) {
-                    parseExpr();
-                    while (match(TOK_COMMA)) {
-                        advance();
-                        parseExpr();
-                    }
-                }
-                consume(TOK_RPAREN, "Lack of ')'");
-                consume(TOK_SEMICOLON, "Lack of ';'");
-            } else {
-                addError("Lack of ';'");
-            }
         } else if (match(TOK_SEMICOLON)) {
+            // 空语句
             advance();
-        } else {
-            addError("Invalid statement");
-            advance();
+        } else if (match(TOK_ID) && peek(1).type == TOK_ASSIGN) {
+            // 赋值语句 (LVal = Expr)
+            // LVal 在这个文法里就是 ID
+            advance(); // ID
+            advance(); // =
+            parseExpr();
+            consume(TOK_SEMICOLON, "Lack of ';'");
+        } else if (match(TOK_EOF) || match(TOK_RBRACE)) {
+            // 意外的文件结尾或块结尾，不消耗 token，
+            // 让 parseBlock 或 parseCompUnit 来处理
+            
+            // 如果是EOF，上层循环会终止
+            // 如果是RBRACE，parseBlock的循环会终止
+            // 但如果在这里，说明它不该出现，加个错误
+            if (!match(TOK_EOF)) { // 别在文件末尾报错
+                 addError("Invalid statement or missing ';'");
+            }
+            // 但我们不能消耗它，所以直接返回
+            return;
+        }
+        else {
+            // 表达式语句 (Expr;)
+            // 这将处理函数调用 (ID(...)) 和其他表达式 (a+b)
+            parseExpr();
+            consume(TOK_SEMICOLON, "Lack of ';'");
         }
     }
 
@@ -478,6 +493,7 @@ private:
             advance();
         } else if (match(TOK_LPAREN)) {
             advance();
+transcribe(input)
             parseExpr();
             consume(TOK_RPAREN, "Lack of ')'");
         } else {
@@ -525,7 +541,7 @@ int main() {
     vector<pair<int, string>> allErrors = lexErrors;
     allErrors.insert(allErrors.end(), parseErrors.begin(), parseErrors.end());
 
-    if (allErrors.empty() && success) {  // 修改这行，加入 success 检查
+    if (allErrors.empty() && success) {
         cout << "accept" << endl;
     } else {
         cout << "reject" << endl;
