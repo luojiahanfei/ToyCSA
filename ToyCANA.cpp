@@ -371,6 +371,7 @@ private:
         parseLOrExpr();
     }
 
+    // LOrExpr → LAndExpr ("||" LAndExpr)*
     void parseLOrExpr() {
         parseLAndExpr();
         while (match(TOK_OR)) {
@@ -379,6 +380,7 @@ private:
         }
     }
 
+    // LAndExpr → RelExpr ("&&" RelExpr)*
     void parseLAndExpr() {
         parseRelExpr();
         while (match(TOK_AND)) {
@@ -387,6 +389,7 @@ private:
         }
     }
 
+    // RelExpr → AddExpr (("<" | ">" | ...) AddExpr)*
     void parseRelExpr() {
         parseAddExpr();
         while (match(TOK_LT) || match(TOK_LE) || match(TOK_GT) || 
@@ -396,6 +399,7 @@ private:
         }
     }
 
+    // AddExpr → MulExpr (("+" | "-") MulExpr)*
     void parseAddExpr() {
         parseMulExpr();
         while (match(TOK_PLUS) || match(TOK_MINUS)) {
@@ -404,6 +408,7 @@ private:
         }
     }
 
+    // MulExpr → UnaryExpr (("*" | "/" | "%") UnaryExpr)*
     void parseMulExpr() {
         parseUnaryExpr();
         while (match(TOK_STAR) || match(TOK_DIV) || match(TOK_MOD)) {
