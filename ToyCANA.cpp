@@ -4,12 +4,10 @@
 #include <cctype>
 #include <map>
 #include <set>
-#include <sstream>
-#include <algorithm>  // 添加这行以使用 sort()
+#include <algorithm>
 
 using namespace std;
 
-// Token types
 enum TokenType {
     TOK_EOF,
     TOK_INT, TOK_VOID, TOK_IF, TOK_ELSE, TOK_WHILE,
@@ -20,15 +18,13 @@ enum TokenType {
     TOK_AND, TOK_OR, TOK_NOT,
     TOK_ASSIGN,
     TOK_LPAREN, TOK_RPAREN, TOK_LBRACE, TOK_RBRACE,
-    TOK_SEMICOLON, TOK_COMMA,
-    TOK_ERROR
+    TOK_SEMICOLON, TOK_COMMA
 };
 
 struct Token {
     TokenType type;
     string value;
     int line;
-    int col;
 };
 
 class Lexer {
@@ -36,8 +32,7 @@ private:
     string input;
     size_t pos;
     int line;
-    int col;
-    vector<pair<int, string>> errors;
+    map<int, string> errors;
 
     char peek(int offset = 0) {
         if (pos + offset >= input.length()) return '\0';
@@ -47,12 +42,7 @@ private:
     char advance() {
         if (pos >= input.length()) return '\0';
         char ch = input[pos++];
-        if (ch == '\n') {
-            line++;
-            col = 1;
-        } else {
-            col++;
-        }
+        if (ch == '\n') line++;
         return ch;
     }
 
@@ -64,9 +54,7 @@ private:
 
     bool skipComment() {
         if (peek() == '/' && peek(1) == '/') {
-            while (peek() != '\n' && peek() != '\0') {
-                advance();
-            }
+            while (peek() != '\n' && peek() != '\0') advance();
             return true;
         }
         if (peek() == '/' && peek(1) == '*') {
@@ -74,7 +62,7 @@ private:
             advance(); advance();
             while (true) {
                 if (peek() == '\0') {
-                    errors.push_back({startLine, "Unterminated comment"});
+                    errors[startLine] = "Unterminated comment";
                     return false;
                 }
                 if (peek() == '*' && peek(1) == '/') {
@@ -89,9 +77,9 @@ private:
     }
 
 public:
-    Lexer(const string& src) : input(src), pos(0), line(1), col(1) {}
+    Lexer(const string& src) : input(src), pos(0), line(1) {}
 
-    vector<pair<int, string>> getErrors() { return errors; }
+    map<int, string> getErrors() { return errors; }
 
     Token nextToken() {
         while (true) {
@@ -101,14 +89,12 @@ public:
 
         Token tok;
         tok.line = line;
-        tok.col = col;
 
         if (peek() == '\0') {
             tok.type = TOK_EOF;
             return tok;
         }
 
-        // Identifiers and keywords
         if (isalpha(peek()) || peek() == '_') {
             string id;
             while (isalnum(peek()) || peek() == '_') {
@@ -129,7 +115,6 @@ public:
             return tok;
         }
 
-        // Numbers
         if (isdigit(peek())) {
             string num;
             while (isdigit(peek())) {
@@ -140,7 +125,6 @@ public:
             return tok;
         }
 
-        // Operators and punctuation
         char ch = peek();
         switch (ch) {
             case '+': advance(); tok.type = TOK_PLUS; return tok;
@@ -195,24 +179,22 @@ public:
                 if (peek() == '&') {
                     advance();
                     tok.type = TOK_AND;
-                } else {
-                    tok.type = TOK_ERROR;
+                    return tok;
                 }
-                return tok;
+                break;
             case '|':
                 advance();
                 if (peek() == '|') {
                     advance();
                     tok.type = TOK_OR;
-                } else {
-                    tok.type = TOK_ERROR;
+                    return tok;
                 }
-                return tok;
-            default:
-                advance();
-                tok.type = TOK_ERROR;
-                return tok;
+                break;
         }
+        
+        advance();
+        tok.type = TOK_EOF;
+        return tok;
     }
 };
 
@@ -220,34 +202,34 @@ class Parser {
 private:
     vector<Token> tokens;
     size_t pos;
-    vector<pair<int, string>> errors;
-    set<int> errorLines;
+    map<int, string> errors;
     int loopDepth;
+    bool hasError;
+
+    Token current() {
+        if (pos >= tokens.size()) return tokens.back();
+        return tokens[pos];
+    }
 
     Token peek(int offset = 0) {
-        if (pos + offset >= tokens.size()) {
-            return tokens.back();
-        }
+        if (pos + offset >= tokens.size()) return tokens.back();
         return tokens[pos + offset];
     }
 
-    Token advance() {
-        if (pos < tokens.size()) {
-            return tokens[pos++];
-        }
-        return tokens.back();
+    void advance() {
+        if (pos < tokens.size()) pos++;
     }
 
-    void addError(const string& msg) {
-        Token tok = peek();
-        if (errorLines.find(tok.line) == errorLines.end()) {
-            errors.push_back({tok.line, msg});
-            errorLines.insert(tok.line);
+    void error(const string& msg) {
+        hasError = true;
+        int line = current().line;
+        if (errors.find(line) == errors.end()) {
+            errors[line] = msg;
         }
     }
 
     bool match(TokenType type) {
-        return peek().type == type;
+        return current().type == type;
     }
 
     bool consume(TokenType type, const string& errMsg) {
@@ -255,11 +237,17 @@ private:
             advance();
             return true;
         }
-        addError(errMsg);
+        error(errMsg);
         return false;
     }
 
-    // Grammar rules
+    void sync() {
+        while (!match(TOK_EOF) && !match(TOK_SEMICOLON) && !match(TOK_RBRACE)) {
+            advance();
+        }
+        if (match(TOK_SEMICOLON)) advance();
+    }
+
     void parseCompUnit() {
         while (!match(TOK_EOF)) {
             parseFuncDef();
@@ -267,32 +255,20 @@ private:
     }
 
     void parseFuncDef() {
-        // ("int" | "void") ID "(" (Param ("," Param)*)? ")" Block
         if (!match(TOK_INT) && !match(TOK_VOID)) {
-            addError("Expected function return type");
-            // Skip to next function
-            while (!match(TOK_EOF) && !match(TOK_INT) && !match(TOK_VOID)) {
-                advance();
-            }
+            error("Expected function return type");
+            sync();
             return;
         }
-        advance(); // consume type
+        advance();
 
         if (!consume(TOK_ID, "Expected function name")) {
-            while (!match(TOK_EOF) && !match(TOK_INT) && !match(TOK_VOID)) {
-                advance();
-            }
+            sync();
             return;
         }
 
-        if (!consume(TOK_LPAREN, "Lack of '('")) {
-            while (!match(TOK_EOF) && !match(TOK_LBRACE)) {
-                if (match(TOK_INT) || match(TOK_VOID)) break;
-                advance();
-            }
-        }
+        consume(TOK_LPAREN, "Lack of '('");
 
-        // Parameters
         if (match(TOK_INT)) {
             parseParam();
             while (match(TOK_COMMA)) {
@@ -301,19 +277,13 @@ private:
             }
         }
 
-        if (!consume(TOK_RPAREN, "Lack of ')'")) {
-            while (!match(TOK_EOF) && !match(TOK_LBRACE)) {
-                if (match(TOK_INT) || match(TOK_VOID)) break;
-                advance();
-            }
-        }
-
+        consume(TOK_RPAREN, "Lack of ')'");
         parseBlock();
     }
 
     void parseParam() {
-        consume(TOK_INT, "Expected parameter type");
-        consume(TOK_ID, "Expected parameter name");
+        consume(TOK_INT, "Expected int");
+        consume(TOK_ID, "Expected identifier");
     }
 
     void parseBlock() {
@@ -328,18 +298,16 @@ private:
         consume(TOK_RBRACE, "Lack of '}'");
     }
 
-   void parseStmt() {
+    void parseStmt() {
         if (match(TOK_INT)) {
-            // 变量声明: "int" ID ("=" Expr)? ";"
             advance();
-            consume(TOK_ID, "Expected variable name");
+            consume(TOK_ID, "Expected identifier");
             if (match(TOK_ASSIGN)) {
                 advance();
                 parseExpr();
             }
             consume(TOK_SEMICOLON, "Lack of ';'");
         } else if (match(TOK_IF)) {
-            // If 语句
             advance();
             consume(TOK_LPAREN, "Lack of '('");
             parseExpr();
@@ -350,7 +318,6 @@ private:
                 parseStmt();
             }
         } else if (match(TOK_WHILE)) {
-            // While 语句
             advance();
             consume(TOK_LPAREN, "Lack of '('");
             parseExpr();
@@ -359,52 +326,47 @@ private:
             parseStmt();
             loopDepth--;
         } else if (match(TOK_BREAK)) {
-            // Break 语句
             advance();
-            if (loopDepth == 0) {
-                addError("break statement not in loop");
-            }
             consume(TOK_SEMICOLON, "Lack of ';'");
         } else if (match(TOK_CONTINUE)) {
-            // Continue 语句
             advance();
-            if (loopDepth == 0) {
-                addError("continue statement not in loop");
-            }
             consume(TOK_SEMICOLON, "Lack of ';'");
         } else if (match(TOK_RETURN)) {
-            // Return 语句
             advance();
             if (!match(TOK_SEMICOLON)) {
                 parseExpr();
             }
             consume(TOK_SEMICOLON, "Lack of ';'");
         } else if (match(TOK_LBRACE)) {
-            // 语句块
             parseBlock();
-        } else if (match(TOK_SEMICOLON)) {
-            // 空语句
+        } else if (match(TOK_ID)) {
             advance();
-        } else if (match(TOK_ID) && peek(1).type == TOK_ASSIGN) {
-            // 赋值语句 (LVal = Expr)
-            // LVal 在这个文法里就是 ID
-            advance(); // ID
-            advance(); // =
-            parseExpr();
-            consume(TOK_SEMICOLON, "Lack of ';'");
-        } else if (match(TOK_EOF) || match(TOK_RBRACE)) {
-            // 意外的文件结尾或块结尾，不消耗 token，
-            // 让 parseBlock 或 parseCompUnit 来处理
-            return;
-        }
-        else {
-            // 表达式语句 (Expr;)
-            // 这将处理函数调用 (ID(...)) 和其他表达式 (a+b)
-            parseExpr();
-            consume(TOK_SEMICOLON, "Lack of ';'");
+            if (match(TOK_ASSIGN)) {
+                advance();
+                parseExpr();
+                consume(TOK_SEMICOLON, "Lack of ';'");
+            } else if (match(TOK_LPAREN)) {
+                advance();
+                if (!match(TOK_RPAREN)) {
+                    parseExpr();
+                    while (match(TOK_COMMA)) {
+                        advance();
+                        parseExpr();
+                    }
+                }
+                consume(TOK_RPAREN, "Lack of ')'");
+                consume(TOK_SEMICOLON, "Lack of ';'");
+            } else {
+                consume(TOK_SEMICOLON, "Lack of ';'");
+            }
+        } else if (match(TOK_SEMICOLON)) {
+            advance();
+        } else {
+            error("Unexpected token");
+            advance();
         }
     }
-    
+
     void parseExpr() {
         parseLOrExpr();
     }
@@ -463,7 +425,6 @@ private:
         if (match(TOK_ID)) {
             advance();
             if (match(TOK_LPAREN)) {
-                // Function call
                 advance();
                 if (!match(TOK_RPAREN)) {
                     parseExpr();
@@ -481,59 +442,56 @@ private:
             parseExpr();
             consume(TOK_RPAREN, "Lack of ')'");
         } else {
-            addError("Expected expression");
+            error("Expected expression");
+            if (!match(TOK_EOF) && !match(TOK_SEMICOLON)) {
+                advance();
+            }
         }
     }
 
 public:
-    Parser(const vector<Token>& toks) : tokens(toks), pos(0), loopDepth(0) {}
+    Parser(const vector<Token>& toks) : tokens(toks), pos(0), loopDepth(0), hasError(false) {}
 
     bool parse() {
         parseCompUnit();
-        return errors.empty();
+        return !hasError;
     }
 
-    vector<pair<int, string>> getErrors() { return errors; }
+    map<int, string> getErrors() { return errors; }
 };
 
 int main() {
-    // Read all input
     string input, line;
     while (getline(cin, line)) {
         input += line + "\n";
     }
 
-    // Lexical analysis
     Lexer lexer(input);
     vector<Token> tokens;
     
     while (true) {
         Token tok = lexer.nextToken();
-        if (tok.type == TOK_ERROR) continue;
         tokens.push_back(tok);
         if (tok.type == TOK_EOF) break;
     }
 
     auto lexErrors = lexer.getErrors();
 
-    // Syntax analysis
     Parser parser(tokens);
     bool success = parser.parse();
     auto parseErrors = parser.getErrors();
 
-    // Merge and output errors
-    vector<pair<int, string>> allErrors = lexErrors;
-    allErrors.insert(allErrors.end(), parseErrors.begin(), parseErrors.end());
+    map<int, string> allErrors = lexErrors;
+    for (const auto& e : parseErrors) {
+        allErrors[e.first] = e.second;
+    }
 
-    if (allErrors.empty() && success) {  // 修改这行，加入 success 检查
+    if (allErrors.empty()) {
         cout << "accept" << endl;
     } else {
         cout << "reject" << endl;
-        
-        sort(allErrors.begin(), allErrors.end());
-        
-        for (const auto& err : allErrors) {
-            cout << err.first << " " << err.second << endl;
+        for (const auto& e : allErrors) {
+            cout << e.first << " " << e.second << endl;
         }
     }
 
