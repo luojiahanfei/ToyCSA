@@ -1,539 +1,475 @@
 #include <iostream>
 #include <string>
 #include <vector>
-#include <cctype>
-#include <map>
-#include <set>
+#include <unordered_map>
 #include <sstream>
-#include <algorithm>  // 添加这行以使用 sort()
+#include <stdexcept>
+#include <cctype>
 
-using namespace std;
+// ======================================================================
+// 1. LEXER DEFINITIONS
+// ======================================================================
 
-// Token types
-enum TokenType {
-    TOK_EOF,
-    TOK_INT, TOK_VOID, TOK_IF, TOK_ELSE, TOK_WHILE,
-    TOK_BREAK, TOK_CONTINUE, TOK_RETURN,
-    TOK_ID, TOK_NUMBER,
-    TOK_PLUS, TOK_MINUS, TOK_STAR, TOK_DIV, TOK_MOD,
-    TOK_LT, TOK_LE, TOK_GT, TOK_GE, TOK_EQ, TOK_NE,
-    TOK_AND, TOK_OR, TOK_NOT,
-    TOK_ASSIGN,
-    TOK_LPAREN, TOK_RPAREN, TOK_LBRACE, TOK_RBRACE,
-    TOK_SEMICOLON, TOK_COMMA,
-    TOK_ERROR
+// All the token types your grammar needs
+enum class TokenType {
+    // Keywords
+    INT, VOID, IF, ELSE, WHILE, BREAK, CONTINUE, RETURN,
+    
+    // Identifiers and Literals
+    ID, NUMBER,
+    
+    // Operators
+    PLUS, MINUS, STAR, SLASH, PERCENT,
+    ASSIGN, // =
+    EQ,     // ==
+    NE,     // !=
+    LT,     // <
+    LE,     // <=
+    GT,     // >
+    GE,     // >=
+    AND,    // &&
+    OR,     // ||
+    NOT,    // !
+    
+    // Punctuation
+    LPAREN,   // (
+    RPAREN,   // )
+    LBRACE,   // {
+    RBRACE,   // }
+    SEMICOLON, // ;
+    COMMA,     // ,
+    
+    // End of File
+    EOFT
 };
 
+// A map to find keywords
+const std::unordered_map<std::string, TokenType> keywords = {
+    {"int", TokenType::INT},
+    {"void", TokenType::VOID},
+    {"if", TokenType::IF},
+    {"else", TokenType::ELSE},
+    {"while", TokenType::WHILE},
+    {"break", TokenType::BREAK},
+    {"continue", TokenType::CONTINUE},
+    {"return", TokenType::RETURN}
+};
+
+// Represents a single token
 struct Token {
     TokenType type;
-    string value;
-    int line;
-    int col;
+    std::string lexeme; // The actual text (e.g., "myVar", "123", "+")
+    int line;           // Line number for error reporting
+
+    // Helper for debugging
+    std::string typeToString() const {
+        switch (type) {
+            case TokenType::INT: return "INT";
+            case TokenType::VOID: return "VOID";
+            case TokenType::IF: return "IF";
+            case TokenType::ELSE: return "ELSE";
+            case TokenType::WHILE: return "WHILE";
+            case TokenType::BREAK: return "BREAK";
+            case TokenType::CONTINUE: return "CONTINUE";
+            case TokenType::RETURN: return "RETURN";
+            case TokenType::ID: return "ID";
+            case TokenType::NUMBER: return "NUMBER";
+            case TokenType::PLUS: return "PLUS";
+            case TokenType::MINUS: return "MINUS";
+            case TokenType::STAR: return "STAR";
+            case TokenType::SLASH: return "SLASH";
+            case TokenType::PERCENT: return "PERCENT";
+            case TokenType::ASSIGN: return "ASSIGN";
+            case TokenType::EQ: return "EQ";
+            case TokenType::NE: return "NE";
+            case TokenType::LT: return "LT";
+            case TokenType::LE: return "LE";
+            case TokenType::GT: return "GT";
+            case TokenType::GE: return "GE";
+            case TokenType::AND: return "AND";
+            case TokenType::OR: return "OR";
+            case TokenType::NOT: return "NOT";
+            case TokenType::LPAREN: return "LPAREN";
+            case TokenType::RPAREN: return "RPAREN";
+            case TokenType::LBRACE: return "LBRACE";
+            case TokenType::RBRACE: return "RBRACE";
+            case TokenType::SEMICOLON: return "SEMICOLON";
+            case TokenType::COMMA: return "COMMA";
+            case TokenType::EOFT: return "EOF";
+            default: return "UNKNOWN";
+        }
+    }
 };
+
+// ======================================================================
+// 2. LEXER CLASS
+// ======================================================================
 
 class Lexer {
-private:
-    string input;
-    size_t pos;
-    int line;
-    int col;
-    vector<pair<int, string>> errors;
+public:
+    Lexer(const std::string& source) : source(source), line(1), start(0), current(0) {}
 
-    char peek(int offset = 0) {
-        if (pos + offset >= input.length()) return '\0';
-        return input[pos + offset];
-    }
-
-    char advance() {
-        if (pos >= input.length()) return '\0';
-        char ch = input[pos++];
-        if (ch == '\n') {
-            line++;
-            col = 1;
-        } else {
-            col++;
+    std::vector<Token> scanTokens() {
+        while (!isAtEnd()) {
+            start = current;
+            scanToken();
         }
-        return ch;
+        tokens.push_back({TokenType::EOFT, "", line});
+        return tokens;
     }
 
-    void skipWhitespace() {
-        while (isspace(peek())) {
+private:
+    const std::string& source;
+    std::vector<Token> tokens;
+    int start;
+    int current;
+    int line;
+
+    bool isAtEnd() { return current >= source.length(); }
+    char advance() { return source[current++]; }
+    char peek() { return isAtEnd() ? '\0' : source[current]; }
+    char peekNext() { return (current + 1 >= source.length()) ? '\0' : source[current + 1]; }
+
+    bool match(char expected) {
+        if (isAtEnd() || source[current] != expected) return false;
+        current++;
+        return true;
+    }
+
+    void addToken(TokenType type) {
+        std::string text = source.substr(start, current - start);
+        tokens.push_back({type, text, line});
+    }
+
+    void blockComment() {
+        while (peek() != '*' || peekNext() != '/') {
+            if (isAtEnd()) {
+                // We'll let the parser report this error, but we need to stop
+                std::cerr << "Line " << line << ": Unterminated block comment." << std::endl;
+                return;
+            }
+            if (peek() == '\n') line++;
             advance();
         }
+        advance(); // Consume '*'
+        advance(); // Consume '/'
     }
 
-    bool skipComment() {
-        if (peek() == '/' && peek(1) == '/') {
-            while (peek() != '\n' && peek() != '\0') {
-                advance();
-            }
-            return true;
-        }
-        if (peek() == '/' && peek(1) == '*') {
-            int startLine = line;
-            advance(); advance();
-            while (true) {
-                if (peek() == '\0') {
-                    errors.push_back({startLine, "Unterminated comment"});
-                    return false;
-                }
-                if (peek() == '*' && peek(1) == '/') {
-                    advance(); advance();
-                    break;
-                }
-                advance();
-            }
-            return true;
-        }
-        return false;
+    void identifier() {
+        while (std::isalnum(peek()) || peek() == '_') advance();
+        std::string text = source.substr(start, current - start);
+        TokenType type = keywords.count(text) ? keywords.at(text) : TokenType::ID;
+        addToken(type);
     }
 
-public:
-    Lexer(const string& src) : input(src), pos(0), line(1), col(1) {}
+    void number() {
+        while (std::isdigit(peek())) advance();
+        addToken(TokenType::NUMBER);
+    }
 
-    vector<pair<int, string>> getErrors() { return errors; }
-
-    Token nextToken() {
-        while (true) {
-            skipWhitespace();
-            if (!skipComment()) break;
-        }
-
-        Token tok;
-        tok.line = line;
-        tok.col = col;
-
-        if (peek() == '\0') {
-            tok.type = TOK_EOF;
-            return tok;
-        }
-
-        // Identifiers and keywords
-        if (isalpha(peek()) || peek() == '_') {
-            string id;
-            while (isalnum(peek()) || peek() == '_') {
-                id += advance();
-            }
-            tok.value = id;
-
-            if (id == "int") tok.type = TOK_INT;
-            else if (id == "void") tok.type = TOK_VOID;
-            else if (id == "if") tok.type = TOK_IF;
-            else if (id == "else") tok.type = TOK_ELSE;
-            else if (id == "while") tok.type = TOK_WHILE;
-            else if (id == "break") tok.type = TOK_BREAK;
-            else if (id == "continue") tok.type = TOK_CONTINUE;
-            else if (id == "return") tok.type = TOK_RETURN;
-            else tok.type = TOK_ID;
-
-            return tok;
-        }
-
-        // Numbers
-        if (isdigit(peek())) {
-            string num;
-            while (isdigit(peek())) {
-                num += advance();
-            }
-            tok.type = TOK_NUMBER;
-            tok.value = num;
-            return tok;
-        }
-
-        // Operators and punctuation
-        char ch = peek();
-        switch (ch) {
-            case '+': advance(); tok.type = TOK_PLUS; return tok;
-            case '-': advance(); tok.type = TOK_MINUS; return tok;
-            case '*': advance(); tok.type = TOK_STAR; return tok;
-            case '/': advance(); tok.type = TOK_DIV; return tok;
-            case '%': advance(); tok.type = TOK_MOD; return tok;
-            case '(': advance(); tok.type = TOK_LPAREN; return tok;
-            case ')': advance(); tok.type = TOK_RPAREN; return tok;
-            case '{': advance(); tok.type = TOK_LBRACE; return tok;
-            case '}': advance(); tok.type = TOK_RBRACE; return tok;
-            case ';': advance(); tok.type = TOK_SEMICOLON; return tok;
-            case ',': advance(); tok.type = TOK_COMMA; return tok;
-            case '<':
-                advance();
-                if (peek() == '=') {
-                    advance();
-                    tok.type = TOK_LE;
-                } else {
-                    tok.type = TOK_LT;
-                }
-                return tok;
-            case '>':
-                advance();
-                if (peek() == '=') {
-                    advance();
-                    tok.type = TOK_GE;
-                } else {
-                    tok.type = TOK_GT;
-                }
-                return tok;
-            case '=':
-                advance();
-                if (peek() == '=') {
-                    advance();
-                    tok.type = TOK_EQ;
-                } else {
-                    tok.type = TOK_ASSIGN;
-                }
-                return tok;
-            case '!':
-                advance();
-                if (peek() == '=') {
-                    advance();
-                    tok.type = TOK_NE;
-                } else {
-                    tok.type = TOK_NOT;
-                }
-                return tok;
-            case '&':
-                advance();
-                if (peek() == '&') {
-                    advance();
-                    tok.type = TOK_AND;
-                } else {
-                    tok.type = TOK_ERROR;
-                }
-                return tok;
-            case '|':
-                advance();
-                if (peek() == '|') {
-                    advance();
-                    tok.type = TOK_OR;
-                } else {
-                    tok.type = TOK_ERROR;
-                }
-                return tok;
+    void scanToken() {
+        char c = advance();
+        switch (c) {
+            case '(': addToken(TokenType::LPAREN); break;
+            case ')': addToken(TokenType::RPAREN); break;
+            case '{': addToken(TokenType::LBRACE); break;
+            case '}': addToken(TokenType::RBRACE); break;
+            case ';': addToken(TokenType::SEMICOLON); break;
+            case ',': addToken(TokenType::COMMA); break;
+            case '+': addToken(TokenType::PLUS); break;
+            case '-': addToken(TokenType::MINUS); break;
+            case '*': addToken(TokenType::STAR); break;
+            case '%': addToken(TokenType::PERCENT); break;
+            case '!': addToken(match('=') ? TokenType::NE : TokenType::NOT); break;
+            case '=': addToken(match('=') ? TokenType::EQ : TokenType::ASSIGN); break;
+            case '<': addToken(match('=') ? TokenType::LE : TokenType::LT); break;
+            case '>': addToken(match('=') ? TokenType::GE : TokenType::GT); break;
+            case '&': if (match('&')) addToken(TokenType::AND); else /* error */; break;
+            case '|': if (match('|')) addToken(TokenType::OR); else /* error */; break;
+            case '/':
+                if (match('/')) while (peek() != '\n' && !isAtEnd()) advance();
+                else if (match('*')) blockComment();
+                else addToken(TokenType::SLASH);
+                break;
+            case ' ': case '\r': case '\t': break;
+            case '\n': line++; break;
             default:
-                advance();
-                tok.type = TOK_ERROR;
-                return tok;
+                if (std::isdigit(c)) number();
+                else if (std::isalpha(c) || c == '_') identifier();
+                else std::cerr << "Line " << line << ": Unexpected character '" << c << "'." << std::endl;
+                break;
         }
     }
 };
 
+// ======================================================================
+// 3. PARSER DEFINITIONS
+// ======================================================================
+
+// A struct to hold error information
+struct ParseError {
+    int line;
+    std::string message;
+};
+
+// A "dummy" exception to unwind the stack for error recovery
+class ParserException : public std::runtime_error {
+public:
+    ParserException() : std::runtime_error("") {}
+};
+
+// ======================================================================
+// 4. PARSER CLASS
+// ======================================================================
+
 class Parser {
+public:
+    Parser(const std::vector<Token>& tokens) : tokens(tokens), current(0) {}
+
+    // Getter for the errors
+    const std::vector<ParseError>& getErrors() const { return errors; }
+
+    // The main function to start parsing
+    void parse() {
+        try {
+            parseCompUnit();
+        } catch (const ParserException& e) {
+            // This just means we stopped parsing.
+            // The errors have already been logged.
+        }
+    }
+
 private:
-    vector<Token> tokens;
-    size_t pos;
-    vector<pair<int, string>> errors;
-    set<int> errorLines;
-    int loopDepth;
+    std::vector<Token> tokens;
+    int current;
+    std::vector<ParseError> errors;
 
-    Token peek(int offset = 0) {
-        if (pos + offset >= tokens.size()) {
-            return tokens.back();
-        }
-        return tokens[pos + offset];
-    }
+    // --- Grammar Functions ---
 
-    Token advance() {
-        if (pos < tokens.size()) {
-            return tokens[pos++];
-        }
-        return tokens.back();
-    }
-
-    void addError(const string& msg) {
-        Token tok = peek();
-        if (errorLines.find(tok.line) == errorLines.end()) {
-            errors.push_back({tok.line, msg});
-            errorLines.insert(tok.line);
-        }
-    }
-
-    bool match(TokenType type) {
-        return peek().type == type;
-    }
-
-    bool consume(TokenType type, const string& errMsg) {
-        if (match(type)) {
-            advance();
-            return true;
-        }
-        addError(errMsg);
-        return false;
-    }
-
-    // Grammar rules
+    // CompUnit → FuncDef+
+    // (Assuming at least one function)
     void parseCompUnit() {
-        while (!match(TOK_EOF)) {
+        while (!isAtEnd()) {
             parseFuncDef();
         }
     }
-
+    
+    // FuncDef → ("int" | "void") ID "(" (Param)? ")" Block
     void parseFuncDef() {
-        // ("int" | "void") ID "(" (Param ("," Param)*)? ")" Block
-        if (!match(TOK_INT) && !match(TOK_VOID)) {
-            addError("Expected function return type");
-            // Skip to next function
-            while (!match(TOK_EOF) && !match(TOK_INT) && !match(TOK_VOID)) {
-                advance();
-            }
-            return;
-        }
-        advance(); // consume type
+        // TODO: Implement this function.
+        // 1. Check for 'int' or 'void'. Consume it.
+        // 2. Consume an ID (the function name).
+        //    -> THIS IS WHERE YOU ADD TO YOUR SYMBOL TABLE
+        // 3. Consume an '('.
+        // 4. Check if the next token is 'int' (meaning params). 
+        //    If so, parseParam() (and handle commas for more params)
+        // 5. Consume a ')'.
+        // 6. Call parseBlock().
+        //
+        // Remember to use consume() and synchronize() on errors.
 
-        if (!consume(TOK_ID, "Expected function name")) {
-            while (!match(TOK_EOF) && !match(TOK_INT) && !match(TOK_VOID)) {
-                advance();
-            }
-            return;
-        }
-
-        if (!consume(TOK_LPAREN, "Lack of '('")) {
-            while (!match(TOK_EOF) && !match(TOK_LBRACE)) {
-                if (match(TOK_INT) || match(TOK_VOID)) break;
-                advance();
-            }
-        }
-
-        // Parameters
-        if (match(TOK_INT)) {
-            parseParam();
-            while (match(TOK_COMMA)) {
-                advance();
-                parseParam();
-            }
-        }
-
-        if (!consume(TOK_RPAREN, "Lack of ')'")) {
-            while (!match(TOK_EOF) && !match(TOK_LBRACE)) {
-                if (match(TOK_INT) || match(TOK_VOID)) break;
-                advance();
-            }
-        }
-
-        parseBlock();
-    }
-
-    void parseParam() {
-        consume(TOK_INT, "Expected parameter type");
-        consume(TOK_ID, "Expected parameter name");
-    }
-
-    void parseBlock() {
-        if (!consume(TOK_LBRACE, "Lack of '{'")) {
-            return;
-        }
-
-        while (!match(TOK_RBRACE) && !match(TOK_EOF)) {
-            parseStmt();
-        }
-
-        consume(TOK_RBRACE, "Lack of '}'");
-    }
-
-    void parseStmt() {
-        if (match(TOK_INT)) {
-            // Variable declaration
-            advance();
-            consume(TOK_ID, "Expected variable name");
-            if (match(TOK_ASSIGN)) {
-                advance();
-                parseExpr();
-            }
-            consume(TOK_SEMICOLON, "Lack of ';'");
-        } else if (match(TOK_IF)) {
-            advance();
-            consume(TOK_LPAREN, "Lack of '('");
-            parseExpr();
-            consume(TOK_RPAREN, "Lack of ')'");
-            parseStmt();
-            if (match(TOK_ELSE)) {
-                advance();
-                parseStmt();
-            }
-        } else if (match(TOK_WHILE)) {
-            advance();
-            consume(TOK_LPAREN, "Lack of '('");
-            parseExpr();
-            consume(TOK_RPAREN, "Lack of ')'");
-            loopDepth++;
-            parseStmt();
-            loopDepth--;
-        } else if (match(TOK_BREAK)) {
-            advance();
-            if (loopDepth == 0) {
-                addError("break statement not in loop");
-            }
-            consume(TOK_SEMICOLON, "Lack of ';'");
-        } else if (match(TOK_CONTINUE)) {
-            advance();
-            if (loopDepth == 0) {
-                addError("continue statement not in loop");
-            }
-            consume(TOK_SEMICOLON, "Lack of ';'");
-        } else if (match(TOK_RETURN)) {
-            advance();
-            if (!match(TOK_SEMICOLON)) {
-                parseExpr();
-            }
-            consume(TOK_SEMICOLON, "Lack of ';'");
-        } else if (match(TOK_LBRACE)) {
-            parseBlock();
-        } else if (match(TOK_ID)) {
-            Token id = advance();
-            if (match(TOK_ASSIGN)) {
-                advance();
-                parseExpr();
-                consume(TOK_SEMICOLON, "Lack of ';'");
-            } else if (match(TOK_LPAREN)) {
-                // Function call
-                advance();
-                if (!match(TOK_RPAREN)) {
-                    parseExpr();
-                    while (match(TOK_COMMA)) {
-                        advance();
-                        parseExpr();
-                    }
-                }
-                consume(TOK_RPAREN, "Lack of ')'");
-                consume(TOK_SEMICOLON, "Lack of ';'");
+        // Example start:
+        try {
+            if (check(TokenType::INT) || check(TokenType::VOID)) {
+                advance(); // Consume return type
             } else {
-                addError("Lack of ';'");
+                logError(peek(), "Expected 'int' or 'void' function return type.");
+                // We're totally lost, just stop? Or try to find next function?
+                // synchronize(); // Let's try to recover
+                return; // Let's just stop this function parse
             }
-        } else if (match(TOK_SEMICOLON)) {
-            advance();
-        } else {
-            addError("Invalid statement");
-            advance();
+
+            consume(TokenType::ID, "Expected function name.");
+            // TODO: Add to symbol table here.
+
+            consume(TokenType::LPAREN, "Expected '(' after function name.");
+
+            // TODO: Parse parameters here if they exist
+            // if (check(TokenType::INT)) { ... }
+
+            consume(TokenType::RPAREN, "Expected ')' after parameters.");
+            parseBlock();
+
+        } catch (const ParserException& e) {
+            // An error was logged, try to recover
+            synchronize();
         }
     }
 
+    // Block → "{" Stmt* "}"
+    void parseBlock() {
+        consume(TokenType::LBRACE, "Expected '{' to start block.");
+        
+        while (!check(TokenType::RBRACE) && !isAtEnd()) {
+            parseStmt();
+        }
+        
+        consume(TokenType::RBRACE, "Expected '}' to end block.");
+    }
+
+    // Stmt → ... (this one is big)
+    void parseStmt() {
+        try {
+            if (check(TokenType::IF)) {
+                // TODO: Implement 'if' statement
+                // consume(TokenType::IF);
+                // consume(TokenType::LPAREN);
+                // parseExpr();
+                // consume(TokenType::RPAREN);
+                // parseStmt();
+                // if (check(TokenType::ELSE)) { ... }
+            } 
+            else if (check(TokenType::WHILE)) {
+                // TODO: Implement 'while' statement
+            }
+            else if (check(TokenType::RETURN)) {
+                // TODO: Implement 'return' statement
+            }
+            else if (check(TokenType::BREAK)) {
+                // TODO: Implement 'break'
+            }
+            else if (check(TokenType::CONTINUE)) {
+                // TODO: Implement 'continue'
+            }
+            else if (check(TokenType::LBRACE)) {
+                // It's a new block
+                parseBlock();
+            }
+            else if (check(TokenType::SEMICOLON)) {
+                // Empty statement
+                advance();
+            }
+            else {
+                // Must be an expression statement
+                // TODO: parseExpr();
+                consume(TokenType::SEMICOLON, "Expected ';' after expression.");
+            }
+        } catch (const ParserException& e) {
+            // Error was logged, recover to next statement
+            synchronize();
+        }
+    }
+
+    // Expr → LOrExpr
     void parseExpr() {
+        // TODO: Implement this. It just calls the next level down.
         parseLOrExpr();
     }
-
-    void parseLOrExpr() {
-        parseLAndExpr();
-        while (match(TOK_OR)) {
-            advance();
-            parseLAndExpr();
-        }
+    
+    // ... all the other expression levels ...
+    void parseLOrExpr()  { /* TODO: parseLAndExpr ( "||" parseLAndExpr )* */ }
+    void parseLAndExpr() { /* TODO: parseRelExpr ( "&&" parseRelExpr )* */ }
+    void parseRelExpr()  { /* TODO: parseAddExpr ( ("<" | ">" | ...) parseAddExpr )* */ }
+    void parseAddExpr()  { /* TODO: parseMulExpr ( ("+" | "-") parseMulExpr )* */ }
+    void parseMulExpr()  { /* TODO: parseUnaryExpr ( ("*" | "/" | "%") parseUnaryExpr )* */ }
+    void parseUnaryExpr(){ /* TODO: ( ("+" | "-" | "!") parseUnaryExpr ) | parsePrimaryExpr */ }
+    
+    // PrimaryExpr → NUMBER | ID | ID "(" (Expr ("," Expr)*)? ")" | "(" Expr ")"
+    void parsePrimaryExpr() { 
+        // TODO: This is where you check for function calls!
+        // if (check(TokenType::NUMBER)) { advance(); return; }
+        // if (check(TokenType::LPAREN)) { ... }
+        // if (check(TokenType::ID)) {
+        //     Token id = advance();
+        //     if (check(TokenType::LPAREN)) {
+        //         // It's a function call!
+        //         // TODO: Parse args, then check symbol table
+        //         // against 'id.lexeme'
+        //     } else {
+        //         // It's just a variable
+        //     }
+        // }
     }
 
-    void parseLAndExpr() {
-        parseRelExpr();
-        while (match(TOK_AND)) {
-            advance();
-            parseRelExpr();
-        }
+
+    // --- Utility Functions ---
+
+    bool check(TokenType type) {
+        return !isAtEnd() && peek().type == type;
+    }
+    
+    bool isAtEnd() { return peek().type == TokenType::EOFT; }
+
+    Token advance() {
+        if (!isAtEnd()) current++;
+        return previous();
     }
 
-    void parseRelExpr() {
-        parseAddExpr();
-        while (match(TOK_LT) || match(TOK_LE) || match(TOK_GT) || 
-               match(TOK_GE) || match(TOK_EQ) || match(TOK_NE)) {
-            advance();
-            parseAddExpr();
-        }
+    Token peek() { return tokens[current]; }
+    Token previous() { return tokens[current - 1]; }
+
+    Token consume(TokenType type, const std::string& errorMessage) {
+        if (check(type)) return advance();
+        logError(peek(), errorMessage);
+        throw ParserException(); // Unwind stack
     }
 
-    void parseAddExpr() {
-        parseMulExpr();
-        while (match(TOK_PLUS) || match(TOK_MINUS)) {
-            advance();
-            parseMulExpr();
-        }
-    }
-
-    void parseMulExpr() {
-        parseUnaryExpr();
-        while (match(TOK_STAR) || match(TOK_DIV) || match(TOK_MOD)) {
-            advance();
-            parseUnaryExpr();
-        }
-    }
-
-    void parseUnaryExpr() {
-        if (match(TOK_PLUS) || match(TOK_MINUS) || match(TOK_NOT)) {
-            advance();
-            parseUnaryExpr();
+    // --- Error Handling ---
+    
+    void logError(const Token& token, const std::string& message) {
+        std::string fullMessage;
+        if (token.type == TokenType::EOFT) {
+            fullMessage = "at end: " + message;
         } else {
-            parsePrimaryExpr();
+            fullMessage = "at '" + token.lexeme + "': " + message;
+        }
+        
+        // Don't log duplicate errors for the same line
+        if (errors.empty() || errors.back().line != token.line) {
+             errors.push_back({token.line, fullMessage});
         }
     }
 
-    void parsePrimaryExpr() {
-        if (match(TOK_ID)) {
-            advance();
-            if (match(TOK_LPAREN)) {
-                // Function call
-                advance();
-                if (!match(TOK_RPAREN)) {
-                    parseExpr();
-                    while (match(TOK_COMMA)) {
-                        advance();
-                        parseExpr();
-                    }
-                }
-                consume(TOK_RPAREN, "Lack of ')'");
+    void synchronize() {
+        advance(); // Consume the bad token
+        while (!isAtEnd()) {
+            if (previous().type == TokenType::SEMICOLON) return; // Found end of a statement
+            switch (peek().type) {
+                // These tokens often start a new "thing"
+                case TokenType::RBRACE:
+                case TokenType::IF:
+                case TokenType::WHILE:
+                case TokenType::RETURN:
+                case TokenType::INT:
+                case TokenType::VOID:
+                    return;
+                default:
+                    advance(); // Keep consuming
             }
-        } else if (match(TOK_NUMBER)) {
-            advance();
-        } else if (match(TOK_LPAREN)) {
-            advance();
-            parseExpr();
-            consume(TOK_RPAREN, "Lack of ')'");
-        } else {
-            addError("Expected expression");
         }
     }
-
-public:
-    Parser(const vector<Token>& toks) : tokens(toks), pos(0), loopDepth(0) {}
-
-    bool parse() {
-        parseCompUnit();
-        return errors.empty();
-    }
-
-    vector<pair<int, string>> getErrors() { return errors; }
 };
 
+// ======================================================================
+// 5. MAIN FUNCTION
+// ======================================================================
+
 int main() {
-    // Read all input
-    string input, line;
-    while (getline(cin, line)) {
-        input += line + "\n";
-    }
+    // Read all of standard input into a string
+    std::stringstream buffer;
+    buffer << std::cin.rdbuf();
+    std::string source = buffer.str();
 
-    // Lexical analysis
-    Lexer lexer(input);
-    vector<Token> tokens;
-    
-    while (true) {
-        Token tok = lexer.nextToken();
-        if (tok.type == TOK_ERROR) continue;
-        tokens.push_back(tok);
-        if (tok.type == TOK_EOF) break;
-    }
+    // 1. Lexing
+    Lexer lexer(source);
+    std::vector<Token> tokens = lexer.scanTokens();
 
-    auto lexErrors = lexer.getErrors();
-
-    // Syntax analysis
+    // 2. Parsing
     Parser parser(tokens);
-    bool success = parser.parse();
-    auto parseErrors = parser.getErrors();
+    parser.parse(); // Run the parser
 
-    // Merge and output errors
-    vector<pair<int, string>> allErrors = lexErrors;
-    allErrors.insert(allErrors.end(), parseErrors.begin(), parseErrors.end());
-
-    if (allErrors.empty() && success) {  // 修改这行，加入 success 检查
-        cout << "accept" << endl;
+    // 3. Report results
+    const auto& errors = parser.getErrors();
+    if (errors.empty()) {
+        std::cout << "accept" << std::endl;
     } else {
-        cout << "reject" << endl;
-        
-        sort(allErrors.begin(), allErrors.end());
-        
-        for (const auto& err : allErrors) {
-            cout << err.first << " " << err.second << endl;
+        std::cout << "reject" << std::endl;
+        for (const auto& err : errors) {
+            // This matches the format: <行号> [空格] <报错信息>
+            // std::cout << err.line << " " << err.message << std::endl;
+            
+            // This matches the minimal format: <行号>
+            std::cout << err.line << std::endl;
         }
     }
 
