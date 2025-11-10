@@ -82,10 +82,10 @@ public:
     map<int, string> getErrors() { return errors; }
 
     Token nextToken() {
-        while (true) {
+        // Fixed: Better comment/whitespace handling
+        do {
             skipWhitespace();
-            if (!skipComment()) break;
-        }
+        } while (skipComment());
 
         Token tok;
         tok.line = line;
@@ -267,7 +267,10 @@ private:
             return;
         }
 
-        consume(TOK_LPAREN, "Lack of '('");
+        if (!consume(TOK_LPAREN, "Lack of '('")) {
+            sync();
+            return;
+        }
 
         if (match(TOK_INT)) {
             parseParam();
@@ -277,7 +280,11 @@ private:
             }
         }
 
-        consume(TOK_RPAREN, "Lack of ')'");
+        if (!consume(TOK_RPAREN, "Lack of ')'")) {
+            sync();
+            return;
+        }
+        
         parseBlock();
     }
 
@@ -301,7 +308,10 @@ private:
     void parseStmt() {
         if (match(TOK_INT)) {
             advance();
-            if (!consume(TOK_ID, "Expected identifier")) return;
+            if (!consume(TOK_ID, "Expected identifier")) {
+                sync();
+                return;
+            }
             if (match(TOK_ASSIGN)) {
                 advance();
                 parseExpr();
@@ -309,9 +319,15 @@ private:
             consume(TOK_SEMICOLON, "Lack of ';'");
         } else if (match(TOK_IF)) {
             advance();
-            if (!consume(TOK_LPAREN, "Lack of '('")) return;
+            if (!consume(TOK_LPAREN, "Lack of '('")) {
+                sync();
+                return;
+            }
             parseExpr();
-            if (!consume(TOK_RPAREN, "Lack of ')'")) return;
+            if (!consume(TOK_RPAREN, "Lack of ')'")) {
+                sync();
+                return;
+            }
             parseStmt();
             if (match(TOK_ELSE)) {
                 advance();
@@ -319,9 +335,15 @@ private:
             }
         } else if (match(TOK_WHILE)) {
             advance();
-            if (!consume(TOK_LPAREN, "Lack of '('")) return;
+            if (!consume(TOK_LPAREN, "Lack of '('")) {
+                sync();
+                return;
+            }
             parseExpr();
-            if (!consume(TOK_RPAREN, "Lack of ')'")) return;
+            if (!consume(TOK_RPAREN, "Lack of ')'")) {
+                sync();
+                return;
+            }
             loopDepth++;
             parseStmt();
             loopDepth--;
@@ -354,23 +376,29 @@ private:
                         parseExpr();
                     }
                 }
-                if (!consume(TOK_RPAREN, "Lack of ')'")) return;
+                if (!consume(TOK_RPAREN, "Lack of ')'")) {
+                    sync();
+                    return;
+                }
                 consume(TOK_SEMICOLON, "Lack of ';'");
             } else {
-                // Standalone identifier - might be valid in some contexts but typically an error
-                // However, we should not report error here as this could be in a valid position
+                // Fixed: Report error for standalone identifier
+                error("Expected ';'");
+                sync();
             }
         } else if (match(TOK_SEMICOLON)) {
             advance();
+        } else if (!match(TOK_RBRACE) && !match(TOK_EOF)) {
+            // Fixed: Report error for unexpected tokens
+            error("Expected statement");
+            sync();
         }
-        // Don't report error for RBRACE or EOF as these are valid statement terminators
     }
 
     void parseExpr() {
         parseLOrExpr();
     }
 
-    // LOrExpr → LAndExpr ("||" LAndExpr)*
     void parseLOrExpr() {
         parseLAndExpr();
         while (match(TOK_OR)) {
@@ -379,7 +407,6 @@ private:
         }
     }
 
-    // LAndExpr → RelExpr ("&&" RelExpr)*
     void parseLAndExpr() {
         parseRelExpr();
         while (match(TOK_AND)) {
@@ -388,7 +415,6 @@ private:
         }
     }
 
-    // RelExpr → AddExpr (("<" | ">" | ...) AddExpr)*
     void parseRelExpr() {
         parseAddExpr();
         while (match(TOK_LT) || match(TOK_LE) || match(TOK_GT) || 
@@ -398,7 +424,6 @@ private:
         }
     }
 
-    // AddExpr → MulExpr (("+" | "-") MulExpr)*
     void parseAddExpr() {
         parseMulExpr();
         while (match(TOK_PLUS) || match(TOK_MINUS)) {
@@ -407,7 +432,6 @@ private:
         }
     }
 
-    // MulExpr → UnaryExpr (("*" | "/" | "%") UnaryExpr)*
     void parseMulExpr() {
         parseUnaryExpr();
         while (match(TOK_STAR) || match(TOK_DIV) || match(TOK_MOD)) {
@@ -447,7 +471,10 @@ private:
             consume(TOK_RPAREN, "Lack of ')'");
         } else {
             error("Expected expression");
-            if (!match(TOK_EOF) && !match(TOK_SEMICOLON)) {
+            // Fixed: Only advance if not at statement terminator
+            if (!match(TOK_EOF) && !match(TOK_SEMICOLON) && 
+                !match(TOK_RPAREN) && !match(TOK_RBRACE) &&
+                !match(TOK_COMMA)) {
                 advance();
             }
         }
