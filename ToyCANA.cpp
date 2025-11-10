@@ -308,6 +308,15 @@ private:
                 advance();
                 parseExpr();
             }
+            // 循环解析后续用逗号分隔的变量
+            while (match(TOK_COMMA)) {
+                advance(); // 消耗逗号
+                consume(TOK_ID, "Expected identifier");
+                if (match(TOK_ASSIGN)) {
+                    advance();
+                    parseExpr();
+                }
+            }
             consume(TOK_SEMICOLON, "Lack of ';'");
         } else if (match(TOK_IF)) {
             advance();
