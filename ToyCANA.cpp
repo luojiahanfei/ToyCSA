@@ -258,12 +258,14 @@ private:
         if (!match(TOK_INT) && !match(TOK_VOID)) {
             error("Expected function return type");
             sync();
+            if (match(TOK_RBRACE)) advance();
             return;
         }
         advance();
 
         if (!consume(TOK_ID, "Expected function name")) {
             sync();
+            if (match(TOK_RBRACE)) advance();
             return;
         }
 
