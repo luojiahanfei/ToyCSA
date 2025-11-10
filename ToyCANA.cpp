@@ -339,31 +339,24 @@ private:
             consume(TOK_SEMICOLON, "Lack of ';'");
         } else if (match(TOK_LBRACE)) {
             parseBlock();
-        } else if (match(TOK_ID)) {
-            advance();
-            if (match(TOK_ASSIGN)) {
-                advance();
-                parseExpr();
-                consume(TOK_SEMICOLON, "Lack of ';'");
-            } else if (match(TOK_LPAREN)) {
-                advance();
-                if (!match(TOK_RPAREN)) {
-                    parseExpr();
-                    while (match(TOK_COMMA)) {
-                        advance();
-                        parseExpr();
-                    }
-                }
-                consume(TOK_RPAREN, "Lack of ')'");
-                consume(TOK_SEMICOLON, "Lack of ';'");
-            } else {
-                consume(TOK_SEMICOLON, "Lack of ';'");
-            }
         } else if (match(TOK_SEMICOLON)) {
+            // 空语句
             advance();
         } else {
-            error("Unexpected token");
-            advance();
+            // 赋值语句 或 表达式语句
+            
+            // 检查是不是赋值语句: ID = ...
+            if (match(TOK_ID) && peek(1).type == TOK_ASSIGN) {
+                advance(); // 消耗 ID
+                advance(); // 消耗 =
+                parseExpr();
+                consume(TOK_SEMICOLON, "Lack of ';'");
+            } else {
+                // 否则，它就是一个表达式语句
+                // (例如 a + b; 或 foo(1); 或 1;)
+                parseExpr();
+                consume(TOK_SEMICOLON, "Lack of ';'");
+            }
         }
     }
 
@@ -448,7 +441,7 @@ private:
             consume(TOK_RPAREN, "Lack of ')'");
         } else {
             error("Expected expression");
-            if (!match(TOK_EOF) && !match(TOK_SEMICOLON)) {
+            if (!match(TOK_EOF) ) {
                 advance();
             }
         }
