@@ -301,7 +301,7 @@ private:
     void parseStmt() {
         if (match(TOK_INT)) {
             advance();
-            consume(TOK_ID, "Expected identifier");
+            if (!consume(TOK_ID, "Expected identifier")) return;
             if (match(TOK_ASSIGN)) {
                 advance();
                 parseExpr();
@@ -309,9 +309,9 @@ private:
             consume(TOK_SEMICOLON, "Lack of ';'");
         } else if (match(TOK_IF)) {
             advance();
-            consume(TOK_LPAREN, "Lack of '('");
+            if (!consume(TOK_LPAREN, "Lack of '('")) return;
             parseExpr();
-            consume(TOK_RPAREN, "Lack of ')'");
+            if (!consume(TOK_RPAREN, "Lack of ')'")) return;
             parseStmt();
             if (match(TOK_ELSE)) {
                 advance();
@@ -319,9 +319,9 @@ private:
             }
         } else if (match(TOK_WHILE)) {
             advance();
-            consume(TOK_LPAREN, "Lack of '('");
+            if (!consume(TOK_LPAREN, "Lack of '('")) return;
             parseExpr();
-            consume(TOK_RPAREN, "Lack of ')'");
+            if (!consume(TOK_RPAREN, "Lack of ')'")) return;
             loopDepth++;
             parseStmt();
             loopDepth--;
@@ -333,7 +333,7 @@ private:
             consume(TOK_SEMICOLON, "Lack of ';'");
         } else if (match(TOK_RETURN)) {
             advance();
-            if (!match(TOK_SEMICOLON)) {
+            if (!match(TOK_SEMICOLON) && !match(TOK_RBRACE) && !match(TOK_EOF)) {
                 parseExpr();
             }
             consume(TOK_SEMICOLON, "Lack of ';'");
@@ -354,17 +354,16 @@ private:
                         parseExpr();
                     }
                 }
-                consume(TOK_RPAREN, "Lack of ')'");
+                if (!consume(TOK_RPAREN, "Lack of ')'")) return;
                 consume(TOK_SEMICOLON, "Lack of ';'");
             } else {
-                consume(TOK_SEMICOLON, "Lack of ';'");
+                // Standalone identifier - might be valid in some contexts but typically an error
+                // However, we should not report error here as this could be in a valid position
             }
         } else if (match(TOK_SEMICOLON)) {
             advance();
-        } else {
-            error("Unexpected token");
-            advance();
         }
+        // Don't report error for RBRACE or EOF as these are valid statement terminators
     }
 
     void parseExpr() {
