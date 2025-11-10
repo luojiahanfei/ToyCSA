@@ -250,7 +250,18 @@ private:
 
     void parseCompUnit() {
         while (!match(TOK_EOF)) {
-            parseFuncDef();
+            if (match(TOK_INT) || match(TOK_VOID)) {
+                if (peek(1).type == TOK_ID && peek(2).type == TOK_LPAREN) {
+                    parseFuncDef();
+                } else {
+                    // 你的语法不支持全局变量，如果遇到就报错并同步
+                    error("Global variable declaration is not supported or invalid top-level declaration");
+                    sync();
+                }
+            } else {
+                error("Expected function definition");
+                if (!match(TOK_EOF)) advance(); // 消耗错误 token
+            }
         }
     }
 
@@ -267,7 +278,10 @@ private:
             return;
         }
 
-        consume(TOK_LPAREN, "Lack of '('");
+        if (!consume(TOK_LPAREN, "Lack of '('")) {
+            sync();
+            return;
+        }
 
         if (match(TOK_INT)) {
             parseParam();
@@ -277,7 +291,10 @@ private:
             }
         }
 
-        consume(TOK_RPAREN, "Lack of ')'");
+        if (!consume(TOK_RPAREN, "Lack of ')'")) {
+            sync();
+            return;
+        }
         parseBlock();
     }
 
@@ -298,6 +315,9 @@ private:
         consume(TOK_RBRACE, "Lack of '}'");
     }
 
+    // =================================================================
+    // 修复 Bug 2: `parseStmt` 逻辑被大幅简化和修正
+    // =================================================================
     void parseStmt() {
         if (match(TOK_INT)) {
             advance();
@@ -340,23 +360,14 @@ private:
         } else if (match(TOK_LBRACE)) {
             parseBlock();
         } else if (match(TOK_SEMICOLON)) {
-            // 空语句
+            // 处理空语句
             advance();
         } else {
-            // 赋值语句 或 表达式语句
-            
-            // 检查是不是赋值语句: ID = ...
-            if (match(TOK_ID) && peek(1).type == TOK_ASSIGN) {
-                advance(); // 消耗 ID
-                advance(); // 消耗 =
-                parseExpr();
-                consume(TOK_SEMICOLON, "Lack of ';'");
-            } else {
-                // 否则，它就是一个表达式语句
-                // (例如 a + b; 或 foo(1); 或 1;)
-                parseExpr();
-                consume(TOK_SEMICOLON, "Lack of ';'");
-            }
+            // 修复：所有其他情况（a = b; foo(); a + b; 等）
+            // 都被视为“表达式语句”，交给 parseExpr() 处理。
+            // 这会正确处理赋值、函数调用和单独的表达式。
+            parseExpr();
+            consume(TOK_SEMICOLON, "Lack of ';'");
         }
     }
 
@@ -440,8 +451,11 @@ private:
             parseExpr();
             consume(TOK_RPAREN, "Lack of ')'");
         } else {
+            // =================================================================
+            // 修复 Bug 1: 防止无限循环 (f19 超时)
+            // =================================================================
             error("Expected expression");
-            if (!match(TOK_EOF) ) {
+            if (!match(TOK_EOF)) { // 只要不是 EOF，就消耗 token
                 advance();
             }
         }
